@@ -120,12 +120,13 @@ class PlanetaryBody:
         else:
             self.dynamo_death_time = 1000  # beyond model time
 
-        print(f'Crystallization Start Time: {self.crystal_start_time:.3f}\n'
-              f'Dynamo Death Time: {self.dynamo_death_time:.3f} Gyr\n'
-              f'Dynamo at Present Day (4.5 Gyr): {present_dynamo}\n'
-              f'Inner Core: {self.inner_core}\n'
-              f'Iron Snow: {self.iron_snow}\n'
-              f'FeS Layer: {self.FeS_layer}')
+        print(f'Dynamo Death Time: {self.dynamo_death_time:.3f} Gyr')
+        #print(f'Crystallization Start Time: {self.crystal_start_time:.3f}\n'
+        #      f'Dynamo Death Time: {self.dynamo_death_time:.3f} Gyr\n'
+        #      f'Dynamo at Present Day (4.5 Gyr): {present_dynamo}\n'
+        #      f'Inner Core: {self.inner_core}\n'
+        #      f'Iron Snow: {self.iron_snow}\n'
+        #      f'FeS Layer: {self.FeS_layer}')
 
 
 class Triton(PlanetaryBody):
@@ -150,6 +151,7 @@ class Triton(PlanetaryBody):
 
         if wtS_C > 28.5:
             self._calculate_core()
+            print(f'CORE SIZE: {self.R_C}')
             self.R_arr, self.T_arr, self.cp_arr, self.rho_arr, self.k_arr = self._initialize_arrays()
 
     def _calculate_core(self):
@@ -158,6 +160,8 @@ class Triton(PlanetaryBody):
         R_C = ((3 * M_RM / 4 / np.pi - self.rho_M * self.R_M ** 3) / (rho_C - self.rho_M)) ** (1 / 3)
         self.rho_C = rho_C
         self.R_C = R_C
-        print('wtS_C = ', self.wtS_C)
-        print('NEW rho_C = ', self.rho_C)
-        print('NEW R_C = ', self.R_C.to(u.km))
+        self.P_CMB = 1.5 * u.GPa
+        self.P_CEN = 2.8 * u.GPa
+        # print('wtS_C = ', self.wtS_C)
+        # print('NEW rho_C = ', self.rho_C)
+        # print('NEW R_C = ', self.R_C.to(u.km))

@@ -7,16 +7,17 @@ import matplotlib.pyplot as plt
 from matplotlib.transforms import offset_copy
 
 
-def EOS_Morard(wt_S: float, P: float, T: float) -> Tuple[u.Quantity, float, u.Quantity, u.Quantity]:  # From Joe O'Rourke
+def EOS_Morard(wt_S: float, P: float, T: float) -> Tuple[
+    u.Quantity, float, u.Quantity, u.Quantity]:  # From Joe O'Rourke
     # Constants
     mm_Fe = 55.845  # molar mass of iron
-    mm_S = 32.065   # molar mass of sulfur
+    mm_S = 32.065  # molar mass of sulfur
 
     # Calculate atomic fraction of S in the alloy
-    X_S = (wt_S/mm_S) / ((100-wt_S)/mm_Fe + wt_S/mm_S)
+    X_S = (wt_S / mm_S) / ((100 - wt_S) / mm_Fe + wt_S / mm_S)
 
     # Density at ambient pressure and 1900 K
-    rho0 = -3108 * X_S**2 - 5176 * X_S + 6950
+    rho0 = -3108 * X_S ** 2 - 5176 * X_S + 6950
 
     # Ratio of rho to rho0
     rhorat = np.linspace(0.9, 1.35, 1001)
@@ -25,7 +26,7 @@ def EOS_Morard(wt_S: float, P: float, T: float) -> Tuple[u.Quantity, float, u.Qu
     # Bulk modulus
     K_TFe = 76e9
     K_TS = 1.6e9
-    K_T0 = K_TFe**(1-X_S) * K_TS**X_S
+    K_T0 = K_TFe ** (1 - X_S) * K_TS ** X_S
 
     # Bulk modulus derivative
     K1_Fe = 6.5
@@ -40,13 +41,15 @@ def EOS_Morard(wt_S: float, P: float, T: float) -> Tuple[u.Quantity, float, u.Qu
     alpha0 = -1 / rho0 * drhodT_0
 
     # Bulk modulus at a given pressure
-    K_T = 0.5 * K_T0 * (7 * rhorat**(7/3) - 5 * rhorat**(5/3)) * (1 + 0.75 * (K1 - 4) * (rhorat**(2/3) - 1)) + 0.75 * K_T0 * (K1 - 4) * (rhorat**3 - rhorat**(7/3))
+    K_T = 0.5 * K_T0 * (7 * rhorat ** (7 / 3) - 5 * rhorat ** (5 / 3)) * (
+                1 + 0.75 * (K1 - 4) * (rhorat ** (2 / 3) - 1)) + 0.75 * K_T0 * (K1 - 4) * (
+                      rhorat ** 3 - rhorat ** (7 / 3))
 
     # Thermal expansivity
     alpha = alpha0 * K_T0 / K_T
 
     # Pressure
-    P_1900 = 1.5 * K_T0 * (rhorat**(7/3) - rhorat**(5/3)) * (1 + 0.75 * (K1 - 4) * (rhorat**(2/3) - 1))
+    P_1900 = 1.5 * K_T0 * (rhorat ** (7 / 3) - rhorat ** (5 / 3)) * (1 + 0.75 * (K1 - 4) * (rhorat ** (2 / 3) - 1))
     P_th = (T - 1900) * alpha * K_T
     P_all = P_th + P_1900
 
@@ -61,7 +64,7 @@ def EOS_Morard(wt_S: float, P: float, T: float) -> Tuple[u.Quantity, float, u.Qu
     Vp_all = np.sqrt(K_T * (1 + alpha * gamm * T) / rho_all)
 
     # Specific heat
-    Cp_all = alpha * Vp_all**2 / gamm
+    Cp_all = alpha * Vp_all ** 2 / gamm
     Cp_interp = interp1d(P_all, Cp_all, fill_value="extrapolate")
     Cp = Cp_interp(P)
 
@@ -69,7 +72,7 @@ def EOS_Morard(wt_S: float, P: float, T: float) -> Tuple[u.Quantity, float, u.Qu
     alpha_interp = interp1d(P_all, alpha, fill_value="extrapolate")
     alpha_out = alpha_interp(P)
 
-    return rho * u.kg / u.m**3, gamm, Cp * u.J / u.kg / u.K, alpha_out / u.K
+    return rho * u.kg / u.m ** 3, gamm, Cp * u.J / u.kg / u.K, alpha_out / u.K
 
 
 def liquidus_BW2011(wt_S: float, P_GPa: float) -> float:  # From Joe O'Rourke
@@ -83,13 +86,13 @@ def liquidus_BW2011(wt_S: float, P_GPa: float) -> float:  # From Joe O'Rourke
     # Calcualte atomic fraction of FeS in the alloy
     X_FeS = X_S / (1 - X_S)
 
-    A = -2.4724 * P_GPa**4 + 28.025 * P_GPa**3 + 9.1404 * P_GPa**2 + 581.71 * P_GPa + 3394.8
-    B = 1.7978 * P_GPa**4 - 6.7881 * P_GPa**3 - 197.69 * P_GPa**2 - 271.69 * P_GPa - 8219.5
-    C = -0.1702 * P_GPa**4 - 9.3959 * P_GPa**3 + 163.53 * P_GPa**2 - 319.35 * P_GPa + 5698.6
-    D = -0.2308 * P_GPa**4 + 7.1 * P_GPa**3 - 64.118 * P_GPa**2 + 105.98 * P_GPa - 1621.9
-    E = 0.2302 * P_GPa**4 - 5.3688 * P_GPa**3 + 38.124 * P_GPa**2 - 46.681 * P_GPa + 1813.8
+    A = -2.4724 * P_GPa ** 4 + 28.025 * P_GPa ** 3 + 9.1404 * P_GPa ** 2 + 581.71 * P_GPa + 3394.8
+    B = 1.7978 * P_GPa ** 4 - 6.7881 * P_GPa ** 3 - 197.69 * P_GPa ** 2 - 271.69 * P_GPa - 8219.5
+    C = -0.1702 * P_GPa ** 4 - 9.3959 * P_GPa ** 3 + 163.53 * P_GPa ** 2 - 319.35 * P_GPa + 5698.6
+    D = -0.2308 * P_GPa ** 4 + 7.1 * P_GPa ** 3 - 64.118 * P_GPa ** 2 + 105.98 * P_GPa - 1621.9
+    E = 0.2302 * P_GPa ** 4 - 5.3688 * P_GPa ** 3 + 38.124 * P_GPa ** 2 - 46.681 * P_GPa + 1813.8
 
-    T = A * X_FeS**4 + B * X_FeS**3 + C * X_FeS**2 + D * X_FeS + E
+    T = A * X_FeS ** 4 + B * X_FeS ** 3 + C * X_FeS ** 2 + D * X_FeS + E
 
     return T
 
@@ -157,7 +160,7 @@ def plot(model, show_plots: bool = False, out_folder: str = '', model_name: str 
 
     t_arr = model.pb.t_arr.to(u.Gyr)
 
-    conv_C_mask = model.pb.Q_C_arr.to(u.GW).value < np.nan_to_num(model.pb.Q_ad_arr.to(u.GW).value)
+    conv_C_mask = model.pb.F_T_arr.to(u.m ** 2 / u.s ** 3).value < 0
     true_indices = np.where(conv_C_mask)[0]
     if len(true_indices) > 0:
         end_index = np.where(np.diff(true_indices) > 1)[0]
@@ -209,10 +212,6 @@ def plot(model, show_plots: bool = False, out_folder: str = '', model_name: str 
     Z = np.array(np.array(model.pb.T_mat[1:, :]).T) * u.K
     T_contours = np.arange(500, 2500, 250) * u.K
 
-    ax_R.axvline(4.5, color='k', linestyle='dotted', linewidth=1, zorder=4)
-    ax_R.text(4.5, model.pb.R_I.to(u.km).value, 'Present', ha='left', va='top',
-              transform=offset_copy(ax_R.transData, fig=fig_R, x=2, y=-2, units='points'), zorder=4)
-
     CS = ax_R.contour(X.value, Y.value, Z.T.value, T_contours.value, colors='black', linewidths=1, linestyles='dashed',
                       zorder=4)
     ax_R.clabel(CS, inline=True, fontsize=8, fmt=lambda val: f'{int(val)} K')
@@ -223,113 +222,59 @@ def plot(model, show_plots: bool = False, out_folder: str = '', model_name: str 
 
     if show_plots:
         plt.show()
+        fig_R.savefig(f'fig1_rename.png', dpi=300, bbox_inches='tight')
 
     if out_folder != '':
         fig_R.savefig(f'{out_folder}/{model_name}_fig1.png', dpi=300, bbox_inches='tight')
 
     # FIGURE 2
-    if model.pb.inner_core or model.pb.FeS_layer:
-        fig_combined, ((ax_Q, ax_T), (ax_Rem, ax_B), (ax_F, ax_TBD), (ax_xS, ax_X)) = plt.subplots(4, 2, figsize=(10, 6*4/3), sharex='all')
+    lw = 3
+    fig_combined, ((ax_Q, ax_T), (ax_Rem, ax_B)) = plt.subplots(2, 2, figsize=(12, 8))
 
-        xEUT = round(model.pb.xEUT_arr[0].value, 3)
-        ax_xS.axhline(xEUT, color='k', linewidth=1, linestyle='dashed')
-        ax_xS.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-        ax_xS.plot(t_arr.value, model.pb.xS_arr, color=color_core,
-                   label='Outer Core' if model.pb.inner_core else 'Inner Core')
-        ax_xS.set_ylabel('Sulfur Fraction')
-        ax_xS.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-        ax_xS.set_ylim(xEUT - 0.1, xEUT + 0.1)
-        ax_xS.set_yticks([xEUT - 0.1, xEUT - 0.05, xEUT, xEUT + 0.05, xEUT + 0.1],
-                         labels=[round(xEUT - 0.1, 2), round(xEUT - 0.05, 2), xEUT, round(xEUT + 0.05, 2),
-                                 round(xEUT + 0.1, 2)])
-        ax_xS.legend(loc='upper right', fontsize=8)
-
-        ax_X.plot(t_arr.value, model.pb.X_arr, color=color_core,
-                  label='Outer Core' if model.pb.inner_core else 'Inner Core')
-        ax_X.set_ylabel('Crystallinity')
-        ax_X.axvline(model.t_start.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-        ax_X.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-        ax_X.axvline(model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-        ax_X.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-        ax_X.set_ylim(0, 1)
-        ax_X.legend(loc='upper right', fontsize=8)
-
-        ax_xS.set_xticks(np.arange(model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value + 1, 1))
-        ax_xS.set_xlabel('Time (Gyr)')
-        ax_X.set_xlabel('Time (Gyr)')
-
-    else:
-        fig_combined, ((ax_Q, ax_T), (ax_Rem, ax_B), (ax_F, ax_TBD)) = plt.subplots(3, 2, figsize=(10, 6*3/3), sharex='all')
-
-        ax_F.set_xticks(np.arange(model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value + 1, 1))
-        ax_F.set_xlabel('Time (Gyr)')
-        ax_TBD.set_xlabel('Time (Gyr)')
-
-    ax_Q.plot(t_arr.value, model.pb.Q_C_arr.to(u.GW).value, color=color_core, label=r'$\mathregular{Q_C}$')
-    ax_Q.plot(t_arr.value, model.pb.Q_ad_arr.to(u.GW).value, color='black', label=r'$\mathregular{Q_{ad}}$')
+    ax_Q.plot(t_arr.value, model.pb.Q_C_arr.to(u.GW).value, color=color_core, label=r'$\mathregular{Q_C}$',
+              linewidth=lw)
+    ax_Q.plot(t_arr.value, model.pb.Q_ad_arr.to(u.GW).value, color='black', label=r'$\mathregular{Q_{ad}}$',
+              linewidth=lw)
     ax_Q.axhline(0, color='black', linewidth=1, linestyle='dashed')
-    ax_Q.axvline(model.t_start.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_Q.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-    ax_Q.axvline(model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
     ax_Q.set_ylabel('Heat Flow (GW)')
     ax_Q.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-    ax_Q.set_ylim(-30, 30)
-    ax_Q.legend(loc='upper right', fontsize=8)
+    ax_Q.set_ylim(-10, 15)
+    ax_Q.set_xticks(np.arange(model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value + 1, 1))
+    ax_Q.set_xlabel('Time (Gyr)')
 
     T_cmb = model.pb.T_mat[0, :]
     T_mid = model.pb.T_mat[round(len(model.pb.R_arr) / 2), :]
-    ax_T.plot(t_arr.value, T_cmb.value, label='CMB', color=color_core)
-    ax_T.plot(t_arr.value, model.pb.T_mat[5, :].value, label='CMB + 30 km', color=color_mantle, linestyle='dashed')
-    ax_T.plot(t_arr.value, T_mid.value, label='Mid-mantle', color=color_mantle)
-    if model.pb.inner_core:
-        ax_T.plot(t_arr.value, model.pb.T_CEN_arr.value, label='CEN', color=color_core2)
-        T_liq = model.pb.T_liq_CEN.value
-        ax_T.axhline(T_liq, model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    else:
-        T_liq = model.pb.T_liq_CMB.value
-        ax_T.axhline(T_liq, model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_T.axvline(model.t_start.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_T.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-    ax_T.axvline(model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
+    ax_T.plot(t_arr.value, T_cmb.value, label='CMB', color=color_core, linewidth=lw)
+    ax_T.plot(t_arr.value, T_mid.value, label='Mid-mantle', color=color_mantle, linewidth=lw)
     ax_T.set_ylabel('Temperature (K)')
     ax_T.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-    ax_T.set_ylim([1200, 2800])
-    ax_T.set_yticks([*ax_T.get_yticks(), round(T_liq)], labels=[*ax_T.get_yticklabels(), round(T_liq)])
-    ax_T.legend(loc='upper right', fontsize=8)
+    ax_T.set_ylim([300, 2200])
+    ax_T.set_xticks(np.arange(model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value + 1, 1))
+    ax_T.set_xlabel('Time (Gyr)')
 
-    ax_Rem.plot(t_arr.value, model.pb.Re_m_arr.value, color=color_ocean)
-    ax_Rem.axhline(model.Rem_C, model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_Rem.axvline(model.t_start.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_Rem.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-    ax_Rem.axvline(model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_Rem.set_ylabel('Magnetic Reynolds\nNumber')
+    ax_Rem.plot(t_arr.value, model.pb.Re_m_arr.value, color=color_ocean, linewidth=lw)
+    ax_Rem.axhline(model.Rem_C, model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value, color='black', linewidth=1,
+                   linestyle='dashed')
+    ax_Rem.set_ylabel('Magnetic Reynolds Number')
     ax_Rem.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-    ax_Rem.set_ylim(0, 400)
-    ax_Rem.set_yticks(sorted(set(range(0, 401, 100)).union([model.Rem_C])), labels=sorted(set(range(0, 401, 100)).union([model.Rem_C])))
+    ax_Rem.set_ylim(0, 350)
+    ax_Rem.set_yticks(sorted(set(range(0, 301, 100)).union([model.Rem_C])),
+                      labels=sorted(set(range(0, 301, 100)).union([model.Rem_C])))
+    ax_Rem.set_xticks(np.arange(model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value + 1, 1))
+    ax_Rem.set_xlabel('Time (Gyr)')
 
-    ax_B.plot(t_arr.value, model.pb.B_S_arr.to(u.uT).value, color=color_ocean)
-    ax_B.axvline(model.t_start.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_B.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-    ax_B.axvline(model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_B.set_ylabel('Surface Magnetic Field\nStrength ($\mathregular{\mu}$T)')
+    ax_B.plot(t_arr.value, model.pb.B_S_arr.to(u.uT).value, color=color_ocean, linewidth=lw)
+    ax_B.set_ylabel('Surface Magnetic Field ($\mathregular{\mu}$T)')
     ax_B.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-    ax_B.set_ylim(0, 4)
-    ax_B.set_yticks(sorted(set(range(0, 5, 1))), labels=sorted(set(range(0, 5, 1))))
-
-    ax_F.plot(t_arr.value, model.pb.F_th_arr.to(u.m**2 / u.s**3).value, color=color_core, label='Thermal')
-    ax_F.plot(t_arr.value, model.pb.F_x_arr.to(u.m**2 / u.s**3).value, color=color_ocean, label='Chemical')
-    ax_F.plot(t_arr.value, model.pb.F_T_arr.to(u.m ** 2 / u.s ** 3).value, color='black', label='Total')
-    ax_F.axhline(0, color='black', linewidth=1, linestyle='dashed')
-    ax_F.axvline(model.t_start.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_F.axvline(4.5, color='black', linewidth=1, linestyle='dotted')
-    ax_F.axvline(model.t_end.to(u.Gyr).value, color='black', linewidth=1, linestyle='dashed')
-    ax_F.set_ylabel('Buoyancy Flux ($\mathregular{m^2/s^3}$)')
-    ax_F.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
-    ax_F.set_ylim(-1e-13, 1e-13)
-    ax_F.legend(loc='upper right', ncol=2, fontsize=8)
+    ax_B.set_ylim(0, 3.75)
+    ax_B.set_yticks(sorted(set(range(0, 4, 1))), labels=sorted(set(range(0, 4, 1))))
+    ax_B.set_xticks(np.arange(model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value + 1, 1))
+    ax_B.set_xlabel('Time (Gyr)')
 
     if show_plots:
         plt.show()
+        fig_combined.savefig(f'fig2_rename.png', dpi=300, bbox_inches='tight')
 
     if out_folder != '':
         fig_combined.savefig(f'{out_folder}/{model_name}_fig2.png', dpi=300, bbox_inches='tight')
+
