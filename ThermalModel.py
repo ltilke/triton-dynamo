@@ -6,18 +6,23 @@ from typing import Tuple
 from astropy import units as u
 from astropy.constants import G
 import matplotlib as mpl
-mpl.use('macosx')
+import sys
+
+if 'ipykernel' in sys.modules:
+    mpl.use('Agg')
+else:
+    mpl.use('macosx')
 
 
 class ThermalModel:
     def __init__(self,
                  pb: PlanetaryBody, t_end: u.Quantity, t_start: u.Quantity = 0 * u.Gyr, t_clip: int = 10,
-                 show_plots: bool = False, out_folder: str = '', model_name: str = ''):
+                 show_plots: bool = False, out_folder: str = '', model_name: str = '', Rem_C: int = 40):
         self.pb = pb
         self.t_end = t_end
         self.t_start = t_start
 
-        self.Rem_C = 40
+        self.Rem_C = Rem_C
 
         self.pb.t_arr, self.pb.T_mat, self.pb.F_C_arr = self._thermal_evolution(t_clip=t_clip)
         # print('THERMAL EVOLUTION MODELLED')
@@ -40,10 +45,9 @@ class ThermalModel:
         self.pb.summarize_results()
         self.summary = {'inner_core': self.pb.inner_core, 'iron_snow': self.pb.iron_snow,
                         'FeS_layer': self.pb.FeS_layer, 'crystal_start_time': self.pb.crystal_start_time,
-                        'dynamo_death_time': self.pb.dynamo_death_time}
+                        'dynamo_cessation_time': self.pb.dynamo_cessation_time}
 
-        if show_plots:
-            plot(model=self, show_plots=show_plots, out_folder=out_folder, model_name=model_name)
+        plot(model=self, show_plots=show_plots, out_folder=out_folder, model_name=model_name)
         # print('DONE')
 
     def _thermal_evolution(self,
@@ -240,7 +244,6 @@ class ThermalModel:
                 u.m ** 2 / u.s ** 3)
 
             # thermal buoyancy flux
-            # F_th = ((alpha_IC * g_IC) / (rho_IC * cp_IC) * (Q_C - Q_ad) / (4 * np.pi * R_IC**2)).to(u.m ** 2 / u.s ** 3)
             F_th = ((alpha_IC * gravity(pb=self.pb, R=self.pb.R_C)) / (rho_IC * cp_IC) * (Q_C - Q_ad) / (
                         4 * np.pi * self.pb.R_C ** 2)).to(u.m ** 2 / u.s ** 3)
 
@@ -404,17 +407,16 @@ class ThermalModel:
 
             # Key derivatives based on the Fe-FeS liquidus and EOS
             dxl_dTl = - 1 / (3650 * u.K)  # Change in sulfur content at the liquidus with temperature
-            dTl_dP = 3.5e-8 * u.K / u.Pa  # Increase in liquidus temperature with pressure (K/Pa)
+            # dTl_dP = 3.5e-8 * u.K / u.Pa  # Increase in liquidus temperature with pressure (K/Pa)
             dTl_dxl = 1 / dxl_dTl  # Change in liquidus temperature with sulfur content (K)
-            dTad_dP = (alpha_WM * T_St / (rho_WM * cp_WM)).to(
-                u.K / u.Pa)  # Increase in adiabatic temperature with pressure (K/Pa)
+            # dTad_dP = (alpha_WM * T_St / (rho_WM * cp_WM)).to(u.K / u.Pa)  # Increase in adiabatic temperature with pressure (K/Pa)
 
             dTC_dt = (- Q_C / (self.pb.M_C * self.pb.cp_C)).to(u.K / u.s)  # Cooling rate of the core (K/s)
             dm_dt = M_St / x_S * dxl_dTl * dTC_dt  # Mass flux of solidified iron (kg/s)
             dxS_dt = - x_S / M_WM * dm_dt  # Change in the sulfur content of the well-mixed region
 
             if not stop_growth:
-                dHSt_dt = - (dxS_dt * dTl_dxl * (1 / (rho_WM * g_St * (dTl_dP - dTad_dP)))).to(
+                dHSt_dt = - (dxS_dt * dTl_dxl * (1 / (rho_WM * g_St * self.pb.Lambda))).to(
                     u.km / u.s)  # Growth rate of the stable layer
             else:
                 dHSt_dt = 0 * u.km / u.s
@@ -442,6 +444,9 @@ class ThermalModel:
                 u.uT)  # magnetic field on the surface at the equator (uT)
 
             if B_S.value < 0:
+                B_S = 0 * u.uT
+
+            if Re_m.value < self.Rem_C:  # ***
                 B_S = 0 * u.uT
 
             return Q_ad, Re_m, B_S, dxS_dt, dHSt_dt, dm_dt, F_x, F_th, F_T, M_WM
@@ -491,6 +496,7 @@ class ThermalModel:
                 if H_St > self.pb.R_C or M_WM.value < 0:
                     H_St = self.pb.R_C.copy()
                     stop_growth = True
+
 
             Q_ad_snow_arr = u.Quantity(Q_ad_snow_arr)
             Re_m_snow_arr = u.Quantity(Re_m_snow_arr)

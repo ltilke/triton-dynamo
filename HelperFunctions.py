@@ -137,7 +137,7 @@ def pressure(r_unscaled, r_C, p_CEN, p_CMB):  # just made it linear? idek
 
 
 def x_eutectic(p):
-    return u.Quantity(0.11 + 0.187 * np.exp(-0.065 * 10 ** -9 * p.to(u.GPa).value))
+    return u.Quantity(0.11 + 0.187 * np.exp(-0.065 * 10 ** -9 * p.to(u.Pa).value))
 
 
 def plot(model, show_plots: bool = False, out_folder: str = '', model_name: str = ''):  # Adapted from Kevin Trinh

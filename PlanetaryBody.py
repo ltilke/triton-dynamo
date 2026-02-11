@@ -60,7 +60,7 @@ class PlanetaryBody:
         self.inner_core, self.R_IC_arr, self.xS_arr, self.xEUT_arr, self.X_arr = False, None, None, None, None  # from inner_core
         self.iron_snow, self.T_liq_mask, self.HSt_arr = False, None, None  # from iron_snow
         self.FeS_layer = False
-        self.dynamo_death_time = None
+        self.dynamo_cessation_time = None
         self.crystal_start_time = None
 
     @staticmethod
@@ -115,29 +115,23 @@ class PlanetaryBody:
         present_dynamo = B_S_vals[present_index] > 0
 
         if B_S_vals[-1] == 0:
-            dynamo_death_index = len(B_S_vals) - np.argmax(B_S_vals[::-1] != 0) - 1
-            self.dynamo_death_time = t_vals[dynamo_death_index]
+            dynamo_cessation_index = len(B_S_vals) - np.argmax(B_S_vals[::-1] != 0) - 1
+            self.dynamo_cessation_time = t_vals[dynamo_cessation_index]
         else:
-            self.dynamo_death_time = 1000  # beyond model time
+            self.dynamo_cessation_time = 1000  # beyond model time
 
-        print(f'Dynamo Death Time: {self.dynamo_death_time:.3f} Gyr')
-        #print(f'Crystallization Start Time: {self.crystal_start_time:.3f}\n'
-        #      f'Dynamo Death Time: {self.dynamo_death_time:.3f} Gyr\n'
-        #      f'Dynamo at Present Day (4.5 Gyr): {present_dynamo}\n'
-        #      f'Inner Core: {self.inner_core}\n'
-        #      f'Iron Snow: {self.iron_snow}\n'
-        #      f'FeS Layer: {self.FeS_layer}')
+        print(f'Dynamo Cessation Time: {self.dynamo_cessation_time:.3f} Gyr')
 
 
 class Triton(PlanetaryBody):
-    def __init__(self, T_Ci: u.Quantity, T_Mi: u.Quantity, rad_coeff: float, Lambda: u.Quantity, wtS_C: float = 12.506):
+    def __init__(self, T_Ci: u.Quantity, T_Mi: u.Quantity, rad_coeff: float, Lambda: u.Quantity, wtS_C: float = 12.506, k_C: u.Quantity = 5.0 * u.W / u.m / u.K):
         super().__init__(
             Omega=1.237432e-5 * u.rad / u.s,
             P_CMB=1.9 * u.GPa, P_CEN=2.8 * u.GPa, T_OMB=250 * u.K,
             R_C=425 * u.km, R_M=1028 * u.km, R_O=1111 * u.km, R_I=1353 * u.km,
             rho_C=6 * u.g / u.cm ** 3, rho_M=3.3 * u.g / u.cm ** 3, rho_O=1 * u.g / u.cm ** 3, rho_I=0.95 * u.g / u.cm ** 3,
 
-            k_C=5.0 * u.W / u.m / u.K, etaM_C=2.0 * u.m**2 / u.s, gamma_C=0.15, mu0_C=4e-07 * np.pi * u.H / u.m, wtS_C=wtS_C,
+            k_C=k_C, etaM_C=2.0 * u.m**2 / u.s, gamma_C=0.15, mu0_C=4e-07 * np.pi * u.H / u.m, wtS_C=wtS_C,
             k_M=4.2 * u.W / u.m / u.K, cp_M=900 * u.J / u.kg / u.K,
             U_ppm_M=0.008, Th_ppm_M=0.03, K_ppm_M=544,
 
@@ -151,7 +145,8 @@ class Triton(PlanetaryBody):
 
         if wtS_C > 28.5:
             self._calculate_core()
-            print(f'CORE SIZE: {self.R_C}')
+            # print(f'CORE SIZE: {self.R_C}')
+            # print(f'CORE Cp: {self.cp_C}')
             self.R_arr, self.T_arr, self.cp_arr, self.rho_arr, self.k_arr = self._initialize_arrays()
 
     def _calculate_core(self):
@@ -162,6 +157,6 @@ class Triton(PlanetaryBody):
         self.R_C = R_C
         self.P_CMB = 1.5 * u.GPa
         self.P_CEN = 2.8 * u.GPa
-        # print('wtS_C = ', self.wtS_C)
-        # print('NEW rho_C = ', self.rho_C)
-        # print('NEW R_C = ', self.R_C.to(u.km))
+        print('wtS_C = ', self.wtS_C)
+        print('NEW rho_C = ', self.rho_C)
+        print('NEW R_C = ', self.R_C.to(u.km))
