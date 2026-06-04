@@ -11,7 +11,33 @@ import sys
 if 'ipykernel' in sys.modules:
     mpl.use('Agg')
 else:
-    mpl.use('macosx')
+    for _backend in ('macosx', 'TkAgg', 'Qt5Agg', 'Agg'):
+        try:
+            mpl.use(_backend)
+            break
+        except (ImportError, ValueError):
+            continue
+
+
+def _thomas(a, b, c, d):
+    """Solve a tridiagonal system (sub a, diag b, super c, rhs d) in O(n).
+ 
+    Arrays a, b, c, d are length n; a[0] and c[-1] are unused. Returns the
+    solution vector. Non-destructive (works on local copies)."""
+    n = len(d)
+    cp = np.empty(n)
+    dp = np.empty(n)
+    cp[0] = c[0] / b[0]
+    dp[0] = d[0] / b[0]
+    for i in range(1, n):
+        m = b[i] - a[i] * cp[i - 1]
+        cp[i] = c[i] / m
+        dp[i] = (d[i] - a[i] * dp[i - 1]) / m
+    x = np.empty(n)
+    x[-1] = dp[-1]
+    for i in range(n - 2, -1, -1):
+        x[i] = dp[i] - cp[i] * x[i + 1]
+    return x
 
 
 class ThermalModel:
@@ -51,7 +77,12 @@ class ThermalModel:
         # print('DONE')
 
     def _thermal_evolution(self,
-                           t_clip: int) -> Tuple[u.Quantity, u.Quantity, u.Quantity]:  # Adapated from Kevin Trinh
+                           t_clip: int) -> Tuple[u.Quantity, u.Quantity, u.Quantity]:
+        # Crank-Nicolson solver for the 1D spherically-symmetric heat diffusion
+        # equation. Replaces the original explicit forward-Euler scheme (adapted
+        # from Kevin Trinh). Uses the same flux-conservative, harmonic-mean face
+        # discretization, so local flux conservation is preserved exactly; only
+        # the time integration changes.
         R_arr = self.pb.R_arr.to(u.m).value
         T_arr = self.pb.T_arr.to(u.K).value
         cp_arr = self.pb.cp_arr.to(u.J / u.kg / u.K).value
@@ -72,53 +103,73 @@ class ThermalModel:
         t_end = self.t_end.to(u.s).value
 
         dR = R_arr[1] - R_arr[0]
-        Kappa_M = (self.pb.k_M / self.pb.rho_M / self.pb.cp_M).to(u.m ** 2 / u.s).value
-        Kappa_C = (self.pb.k_C / self.pb.rho_C / self.pb.cp_C).to(u.m ** 2 / u.s).value
-        dt = 0.3 * dR ** 2 / max(Kappa_M, Kappa_C)
-
-        # solve the 1D (spherically-symmetric) heat diffusion equation
-        t = t_start
         n = len(R_arr)
 
-        t_arr = np.arange(t_start, t_end, dt)[0::t_clip]  # array of saved time stamps
-        T_mat = np.zeros((n, len(t_arr))) * np.nan  # matrix of saved T-profile
-        F_C_arr = np.zeros(len(t_arr)) * np.nan  # CMB heat flux array [W / m^2]
+        kappa_local = k_arr / (rho_arr * cp_arr)
+        Kappa_C = (self.pb.k_C / self.pb.rho_C / self.pb.cp_C).to(u.m ** 2 / u.s).value
+        kappa_max = max(kappa_local.max(), Kappa_C)
+        dt = 3.0 * dR ** 2 / kappa_max # CN is unconditionally stable, no stability safety factor needed.
+
+        # Precompute the spatial-operator coefficients.
+        a = np.zeros(n)
+        b = np.zeros(n)
+        c = np.zeros(n)
+        pref = 2.0 / (rho_arr * cp_arr * dR * R_arr ** 2)
+        for j in range(1, n - 1):
+            a[j] = pref[j] * (R_arr[j] - dR / 2) ** 2 / (dR / k_arr[j] + dR / k_arr[j - 1])
+            c[j] = pref[j] * (R_arr[j] + dR / 2) ** 2 / (dR / k_arr[j + 1] + dR / k_arr[j])
+            b[j] = -(a[j] + c[j])
+
+        alpha_C = 4 * np.pi * R_C_val ** 2 * k_C_val / (M_C_val * cp_C_val * dR)
+        b[0] = -alpha_C
+        c[0] = alpha_C
+
+        # Source vector defined as a function of time for CN evaluation.
+        def H_source(time):
+            H_term = np.sum(qR0_M_arr * np.exp(-lamb_arr * time))
+            s = np.zeros(n)
+            s[1:] = H_term / cp_M_val
+            return s
+
+        t = t_start
+        t_arr = np.arange(t_start, t_end, dt)[0::t_clip]  # saved time stamps
+        T_mat = np.zeros((n, len(t_arr))) * np.nan  # saved T-profiles
+        F_C_arr = np.zeros(len(t_arr)) * np.nan  # CMB heat flux [W / m^2]
         i, k = 0, 0  # timestep index, save index
 
+        # LHS tridiagonal (I - dt/2 L) is constant for pure CN, so build it once.
+        lhs_a = -0.5 * dt * a
+        lhs_b = 1.0 - 0.5 * dt * b
+        lhs_c = -0.5 * dt * c
+        # Outer node: Dirichlet. Pin row n-1 to T_OMB (constant row).
+        lhs_a[-1] = 0.0
+        lhs_b[-1] = 1.0
+        lhs_c[-1] = 0.0
+
         while t < t_end:
-            # reset time-dependent arrays
-            T_tmp = T_arr
-            cond_term = np.zeros(n)
+            # Midpoint source for second-order accuracy.
+            s = H_source(t + 0.5 * dt)
 
-            # solve for CMB conduction
+            # Build the explicit (RHS) action: (I + dt/2 L) T^n + dt*s.
+            rhs = T_arr.copy()
+            LT = np.zeros(n)
+            LT[0] = b[0] * T_arr[0] + c[0] * T_arr[1]
+            LT[1:-1] = a[1:-1] * T_arr[:-2] + b[1:-1] * T_arr[1:-1] + c[1:-1] * T_arr[2:]
+            rhs += 0.5 * dt * LT + dt * s
+            rhs[-1] = T_OMB_val  # Dirichlet outer node
+
+            T_arr = _thomas(lhs_a, lhs_b, lhs_c, rhs)
+
+            # Solve for CMB conduction.
             F_CMB = - k_C_val * (T_arr[0] - T_arr[1]) / dR
-            cond_term[0] = 4 * np.pi * R_C_val ** 2 * F_CMB / M_C_val / cp_C_val  # dT_C/dt
 
-            # solve for mantle conduction
-            for j in range(1, n - 1):
-                h1 = (R_arr[j] - dR / 2) ** 2 * (T_arr[j] - T_arr[j - 1]) / (dR / k_arr[j] + dR / k_arr[j - 1])
-                h2 = (R_arr[j] + dR / 2) ** 2 * (T_arr[j + 1] - T_arr[j]) / (dR / k_arr[j + 1] + dR / k_arr[j])
-                tmp = (2 / rho_arr[j] / cp_arr[j] / dR / R_arr[j] / R_arr[j]) * (h2 - h1)
-                cond_term[j] = tmp
-
-            # solve for radiogenic specific heating
-            H_term = sum(qR0_M_arr * np.exp(-lamb_arr * t))
-
-            # update temperature profile
-            dT_dt_arr = cond_term
-            dT_dt_arr[1:] += H_term / cp_M_val
-            T_tmp += dT_dt_arr * dt
-            T_tmp[-1] = T_OMB_val
-            T_arr = T_tmp
-
-            # append results occasionally
-            if i % t_clip == 0:
+            # Append results occasionally.
+            if i % t_clip == 0 and k < len(t_arr):
                 F_C_arr[k] = F_CMB
-                T_mat[:, k] = T_arr
+                T_mat[:, k] = T_arr.copy()
                 k += 1
-                # print(f'\rMODEL TIME = {(t * u.s).to(u.Gyr).value:.3f} GYR', end='')
 
-            # update time and counter
+            # Update time and counter
             t += dt
             i += 1
 
@@ -234,7 +285,7 @@ class ThermalModel:
             rho_IC, gamma_IC, cp_IC, alpha_IC = EOS_Morard(wt_S=xS.value * 100, P=self.pb.P_CMB.to(u.Pa).value,
                                                            T=T_C.to(u.K).value)
             rho_FeS, _, _, _ = EOS_Morard(wt_S=xS_FeS * 100, P=self.pb.P_CMB.to(u.Pa).value, T=T_C.to(u.K).value)
-            rho_C_new, _, _, _ = EOS_Morard(wt_S=xS * 100, P=self.pb.P_CMB.to(u.Pa).value, T=T_C.to(u.K).value)
+            rho_C_new, _, _, _ = EOS_Morard(wt_S=xS.value * 100, P=self.pb.P_CMB.to(u.Pa).value, T=T_C.to(u.K).value)
 
             M_OC = (4 / 3 * np.pi * (self.pb.R_C ** 3 - R_IC ** 3) * rho_FeS).to(u.kg)
             dX_dt = (Q_C / (L * M_OC)).to(1 / u.s)
@@ -265,7 +316,7 @@ class ThermalModel:
             if X_IC >= 0.6:
                 Re_m = u.Quantity(0)
                 B_S = 0 * u.uT
-                if X_OC >= 1.0:
+                if X_IC >= 1.0:
                     dX_dt = 0 / u.s
 
             if Re_m.value < self.Rem_C:
@@ -298,6 +349,8 @@ class ThermalModel:
         X_arr = []
         j = 0
 
+        dt = np.diff(self.pb.t_arr)[0]  # constant save-cadence timestep
+
         for i in range(len(T_C_arr)):
             T_C = T_C_arr[i]
             Q_C = Q_C_arr[i]
@@ -317,7 +370,6 @@ class ThermalModel:
                     T_C_IC = T_CEN.copy()
                 Re_m, B_S, xS, xEUT, dRIC_dt, dTC_dt, dX_dt, F_x, F_th, F_T = inner_core(R_IC_IC, xS_0, Q_C, Q_ad, X_OC)
 
-                dt = np.diff(self.pb.t_arr)[0]
                 R_IC_IC += dRIC_dt * dt
                 T_C_IC += dTC_dt * dt
 
@@ -344,7 +396,6 @@ class ThermalModel:
                     T_C_IC = T_C.copy()
                 Re_m, B_S, xS, xEUT, dRIC_dt, dTC_dt, dX_dt, F_x, F_th, F_T = FeS_layer(R_IC_FES, xS_0, Q_C, Q_ad, X_IC)
 
-                dt = np.diff(self.pb.t_arr)[0]
                 R_IC_FES += dRIC_dt * dt
                 T_C_IC += dTC_dt * dt
 
@@ -356,6 +407,7 @@ class ThermalModel:
                 xEUT_arr.append(xEUT)
                 X_arr.append(X_IC)
                 self.pb.T_mat[0][i] = T_C_IC.copy()
+                T_CEN_arr.append(T_CEN)
 
                 F_x_arr.append(F_x)
                 F_th_arr.append(F_th)
@@ -371,6 +423,8 @@ class ThermalModel:
                 X_arr.append(0)
 
                 F_x_arr.append(0 * u.m ** 2 / u.s ** 3)
+                # No compositional buoyancy in the pure-thermal regime, so the
+                # thermal flux equals the total flux returned by core_mag.
                 F_th_arr.append(F_T)
                 F_T_arr.append(F_T)
                 T_CEN_arr.append(T_CEN)
