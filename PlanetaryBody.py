@@ -114,7 +114,9 @@ class PlanetaryBody:
         present_index = np.abs(t_vals - 4.5).argmin()
         present_dynamo = B_S_vals[present_index] > 0
 
-        if B_S_vals[-1] == 0:
+        if not np.any(B_S_vals != 0):
+            self.dynamo_cessation_time = t_vals[0]  # no dynamo at any time
+        elif B_S_vals[-1] == 0:
             dynamo_cessation_index = len(B_S_vals) - np.argmax(B_S_vals[::-1] != 0) - 1
             self.dynamo_cessation_time = t_vals[dynamo_cessation_index]
         else:
@@ -143,7 +145,7 @@ class Triton(PlanetaryBody):
             T_Ci=T_Ci, T_Mi=T_Mi, rad_coeff=rad_coeff, Lambda=Lambda, S_rich=False if wtS_C < 28.5 else True
         )
 
-        if wtS_C > 28.5:
+        if self.S_rich:
             self._calculate_core()
             # print(f'CORE SIZE: {self.R_C}')
             # print(f'CORE Cp: {self.cp_C}')
@@ -157,6 +159,15 @@ class Triton(PlanetaryBody):
         self.R_C = R_C
         self.P_CMB = 1.5 * u.GPa
         self.P_CEN = 2.8 * u.GPa
+
+        # RECALCULATE VALUES THAT DEPEND ON R_C, rho_C OR P_CMB (set in PlanetaryBody.__init__)
+        self.cp_C = EOS_Morard(wt_S=self.wtS_C, P=self.P_CMB.to(u.Pa).value, T=self.T_Ci.value)[2]
+        self.T_liq_CMB = liquidus_BW2011(wt_S=self.wtS_C, P_GPa=self.P_CMB.to(u.GPa).value) * u.K
+        self.T_liq_CEN = liquidus_BW2011(wt_S=self.wtS_C, P_GPa=self.P_CEN.to(u.GPa).value) * u.K
+        self.M_C = self._calculate_mass(self.R_C, 0 * u.km, self.rho_C)
+        self.M_M = self._calculate_mass(self.R_M, self.R_C, self.rho_M)
+        self.M_TOTAL = self.M_C + self.M_M + self.M_O + self.M_I
+
         print('wtS_C = ', self.wtS_C)
         print('NEW rho_C = ', self.rho_C)
         print('NEW R_C = ', self.R_C.to(u.km))

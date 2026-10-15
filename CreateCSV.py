@@ -19,7 +19,7 @@ Lambda_arr = np.array([ -37e-9,    37e-9,   -138e-9])
 df = pd.DataFrame(list(product(T_Ci_arr, T_Mi_arr, rad_coeff_arr, wtS_C_arr, Lambda_arr, kc_arr)), columns=['T_Ci', 'T_Mi', 'rad_coeff', 'wtS_C', 'Lambda', 'k_C'])
 
 df_core_conditions = [
-    (df['Lambda'] == -37e-9) & (df['wtS_C'] < 28.5),  # == 12.506),
+    (df['Lambda'] == -37e-9) & (df['wtS_C'] > 0) & (df['wtS_C'] < 28.5),  # iron snow needs S in the core
     (df['Lambda'] == 37e-9) & (df['wtS_C'] < 28.5),
     (df['Lambda'] == -138e-9) & (df['wtS_C'] > 28.5)
 ]

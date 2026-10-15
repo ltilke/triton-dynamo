@@ -4,6 +4,7 @@ from HelperFunctions import plot
 
 from astropy import units as u
 import pickle
+import os
 
 
 ###
@@ -14,6 +15,8 @@ import pickle
 # IRON SNOW: Lambda = -37e-9, wtS_C = 12.506
 # INNER CORE: Lambda = 37e-9, wtS_C = 12.506
 # FES LAYER: Lambda = -138e-9, wtS_C > 28.5
+
+os.makedirs('Triton_models', exist_ok=True)
 
 triton_nominal_FeSLayer = Triton(T_Ci=2200 * u.K, T_Mi=1800 * u.K, rad_coeff=1.0, Lambda=-138e-9 * u.K / u.Pa, wtS_C=33)
 model_nominal_FeSLayer = ThermalModel(pb=triton_nominal_FeSLayer, t_end=14 * u.Gyr, t_clip=5, show_plots=True)
