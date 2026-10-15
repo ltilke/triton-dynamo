@@ -131,9 +131,10 @@ def latent(xS_unscaled):
     return L_Fe + xS_scaled * (L_FeS - L_Fe)
 
 
-def pressure(r_unscaled, r_C, p_CEN, p_CMB):  # just made it linear? idek
+def pressure(r_unscaled, r_C, p_CEN, p_CMB):  # hydrostatic pressure inside the core
+    # For uniform density, g = g_CMB r / R_C, so dP/dr = -rho g gives P quadratic in r.
     r_scaled = r_unscaled / r_C
-    return p_CEN + r_scaled * (p_CMB - p_CEN)
+    return p_CEN + r_scaled ** 2 * (p_CMB - p_CEN)
 
 
 def x_eutectic(p):
@@ -253,8 +254,7 @@ def plot(model, show_plots: bool = False, out_folder: str = '', model_name: str 
     ax_T.set_xlabel('Time (Gyr)')
 
     ax_Rem.plot(t_arr.value, model.pb.Re_m_arr.value, color=color_ocean, linewidth=lw)
-    ax_Rem.axhline(model.Rem_C, model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value, color='black', linewidth=1,
-                   linestyle='dashed')
+    ax_Rem.axhline(model.Rem_C, color='black', linewidth=1, linestyle='dashed')
     ax_Rem.set_ylabel('Magnetic Reynolds Number')
     ax_Rem.set_xlim([model.t_start.to(u.Gyr).value, model.t_end.to(u.Gyr).value])
     ax_Rem.set_ylim(0, 350)

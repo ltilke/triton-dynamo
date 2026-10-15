@@ -27,7 +27,7 @@ def run_models(df, out_folder: str = ''):
 
         start_time = time.time()
 
-        model_path = f'Triton_models/{model_name}.pkl'
+        model_path = f'Triton_models/{model_name}_{model_version}.pkl'  # version tag avoids reusing stale cached models
         if os.path.isfile(model_path):
             with open(model_path, 'rb') as f:
                 model = pickle.load(f)
@@ -50,4 +50,7 @@ def run_models(df, out_folder: str = ''):
 
 Rem_C = 40
 # Rem_C = 40, 100, 150, 200
+model_version = 'CN-v2'  # bump whenever the model physics or numerics change
+os.makedirs('Triton_models', exist_ok=True)
+os.makedirs('Triton_figs', exist_ok=True)
 run_models(df=pd.read_csv('Triton_models.csv'), out_folder='Triton_figs').to_csv(f'Triton_results_RemC{Rem_C}.csv')
