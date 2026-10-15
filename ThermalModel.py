@@ -57,6 +57,8 @@ class ThermalModel:
         # print('CORE HEAT MODELLED')
 
         if self.pb.Lambda.value < 0 and not self.pb.S_rich:
+            if self.pb.wtS_C <= 0:
+                raise ValueError('Iron snow requires a sulfur-bearing core (wtS_C > 0).')
             self._iron_snow()
 
         if self.pb.inner_core:
@@ -92,7 +94,6 @@ class ThermalModel:
         qR0_M_arr = u.Quantity([sub_dict['qR0_sc'] for sub_dict in self.pb.iso_dict.values()]).to(u.W / u.kg).value
         lamb_arr = u.Quantity([sub_dict['lamb'] for sub_dict in self.pb.iso_dict.values()]).to(1 / u.s).value
 
-        k_C_val = self.pb.k_C.to(u.W / u.m / u.K).value
         R_C_val = self.pb.R_C.to(u.m).value
         M_C_val = self.pb.M_C.to(u.kg).value
         cp_C_val = self.pb.cp_C.to(u.J / u.kg / u.K).value
@@ -110,17 +111,29 @@ class ThermalModel:
         kappa_max = max(kappa_local.max(), Kappa_C)
         dt = 3.0 * dR ** 2 / kappa_max # CN is unconditionally stable, no stability safety factor needed.
 
+        # Face conductivities: harmonic mean of the two neighboring nodes. The
+        # CMB face (between the core node and node 1, at R_C + dR/2) lies in the
+        # mantle thermal boundary layer, so it takes the mantle conductivity;
+        # k_C only enters the core's adiabatic heat flow (Q_ad).
+        k_face = 2 * k_arr[1:] * k_arr[:-1] / (k_arr[1:] + k_arr[:-1])
+        k_face[0] = k_arr[1]
+        k_CMB_val = k_face[0]
+        R_CMB_face = R_C_val + dR / 2
+
         # Precompute the spatial-operator coefficients.
         a = np.zeros(n)
         b = np.zeros(n)
         c = np.zeros(n)
         pref = 2.0 / (rho_arr * cp_arr * dR * R_arr ** 2)
         for j in range(1, n - 1):
-            a[j] = pref[j] * (R_arr[j] - dR / 2) ** 2 / (dR / k_arr[j] + dR / k_arr[j - 1])
-            c[j] = pref[j] * (R_arr[j] + dR / 2) ** 2 / (dR / k_arr[j + 1] + dR / k_arr[j])
+            a[j] = pref[j] * (R_arr[j] - dR / 2) ** 2 * k_face[j - 1] / (2 * dR)
+            c[j] = pref[j] * (R_arr[j] + dR / 2) ** 2 * k_face[j] / (2 * dR)
             b[j] = -(a[j] + c[j])
 
-        alpha_C = 4 * np.pi * R_C_val ** 2 * k_C_val / (M_C_val * cp_C_val * dR)
+        # Core node: lumped, isothermal core losing heat through the same face
+        # (same area, same conductivity) that node 1 gains it through, so the
+        # CMB exchange conserves energy exactly.
+        alpha_C = 4 * np.pi * R_CMB_face ** 2 * k_CMB_val / (M_C_val * cp_C_val * dR)
         b[0] = -alpha_C
         c[0] = alpha_C
 
@@ -131,47 +144,66 @@ class ThermalModel:
             s[1:] = H_term / cp_M_val
             return s
 
-        t = t_start
-        t_arr = np.arange(t_start, t_end, dt)[0::t_clip]  # saved time stamps
+        def CMB_flux(T):
+            # Heat flux across the CMB face, referred to the CMB area 4 pi R_C^2
+            # so that Q_C = -4 pi R_C^2 F_C is the core's actual heat loss.
+            return - k_CMB_val * (T[0] - T[1]) / dR * (R_CMB_face / R_C_val) ** 2
+
+        # Fixed number of steps on the grid t_i = t_start + i*dt (no accumulated
+        # rounding in t); every t_clip-th state is saved, starting with t_start.
+        n_steps = len(np.arange(t_start, t_end, dt))
+        t_arr = t_start + np.arange(0, n_steps, t_clip) * dt  # saved time stamps
         T_mat = np.zeros((n, len(t_arr))) * np.nan  # saved T-profiles
         F_C_arr = np.zeros(len(t_arr)) * np.nan  # CMB heat flux [W / m^2]
-        i, k = 0, 0  # timestep index, save index
 
-        # LHS tridiagonal (I - dt/2 L) is constant for pure CN, so build it once.
-        lhs_a = -0.5 * dt * a
-        lhs_b = 1.0 - 0.5 * dt * b
-        lhs_c = -0.5 * dt * c
-        # Outer node: Dirichlet. Pin row n-1 to T_OMB (constant row).
-        lhs_a[-1] = 0.0
-        lhs_b[-1] = 1.0
-        lhs_c[-1] = 0.0
+        T_mat[:, 0] = T_arr.copy()  # initial condition
+        F_C_arr[0] = CMB_flux(T_arr)
 
-        while t < t_end:
-            # Midpoint source for second-order accuracy.
-            s = H_source(t + 0.5 * dt)
+        # The initial profile is discontinuous (core/mantle and at the outer
+        # boundary). CN only damps the stiffest modes weakly (amplification -> -1),
+        # so take a few L-stable backward-Euler steps first (Rannacher start-up);
+        # their O(dt^2) local error keeps the scheme second-order overall.
+        n_startup = 4
 
-            # Build the explicit (RHS) action: (I + dt/2 L) T^n + dt*s.
-            rhs = T_arr.copy()
-            LT = np.zeros(n)
-            LT[0] = b[0] * T_arr[0] + c[0] * T_arr[1]
-            LT[1:-1] = a[1:-1] * T_arr[:-2] + b[1:-1] * T_arr[1:-1] + c[1:-1] * T_arr[2:]
-            rhs += 0.5 * dt * LT + dt * s
+        # LHS tridiagonals (I - theta dt L) are constant, so build them once:
+        # theta = 1/2 for CN, theta = 1 for backward Euler.
+        def build_lhs(theta):
+            lhs_a = -theta * dt * a
+            lhs_b = 1.0 - theta * dt * b
+            lhs_c = -theta * dt * c
+            # Outer node: Dirichlet. Pin row n-1 to T_OMB (constant row).
+            lhs_a[-1] = 0.0
+            lhs_b[-1] = 1.0
+            lhs_c[-1] = 0.0
+            return lhs_a, lhs_b, lhs_c
+
+        lhs_CN = build_lhs(0.5)
+        lhs_BE = build_lhs(1.0)
+
+        for i in range(1, n_steps):
+            t = t_start + (i - 1) * dt  # time at the start of this step
+
+            if i <= n_startup:
+                # Backward Euler: (I - dt L) T^{n+1} = T^n + dt*s(t^{n+1}).
+                rhs = T_arr + dt * H_source(t + dt)
+                lhs = lhs_BE
+            else:
+                # Crank-Nicolson: (I - dt/2 L) T^{n+1} = (I + dt/2 L) T^n + dt*s,
+                # with a midpoint source for second-order accuracy.
+                LT = np.zeros(n)
+                LT[0] = b[0] * T_arr[0] + c[0] * T_arr[1]
+                LT[1:-1] = a[1:-1] * T_arr[:-2] + b[1:-1] * T_arr[1:-1] + c[1:-1] * T_arr[2:]
+                rhs = T_arr + 0.5 * dt * LT + dt * H_source(t + 0.5 * dt)
+                lhs = lhs_CN
             rhs[-1] = T_OMB_val  # Dirichlet outer node
 
-            T_arr = _thomas(lhs_a, lhs_b, lhs_c, rhs)
+            T_arr = _thomas(*lhs, rhs)
 
-            # Solve for CMB conduction.
-            F_CMB = - k_C_val * (T_arr[0] - T_arr[1]) / dR
-
-            # Append results occasionally.
-            if i % t_clip == 0 and k < len(t_arr):
-                F_C_arr[k] = F_CMB
+            # Save every t_clip-th state; T_arr is now the state at t_start + i*dt.
+            if i % t_clip == 0:
+                k = i // t_clip
+                F_C_arr[k] = CMB_flux(T_arr)
                 T_mat[:, k] = T_arr.copy()
-                k += 1
-
-            # Update time and counter
-            t += dt
-            i += 1
 
         print()
         return t_arr * u.s, T_mat * u.K, F_C_arr * u.W / u.m ** 2
@@ -188,6 +220,9 @@ class ThermalModel:
             M = (4 * np.pi * self.pb.R_C ** 3 * self.pb.gamma_C * (mag_rho / self.pb.mu0_C) ** (1 / 2) * (
                         F_T * self.pb.R_C) ** (1 / 3)).to(u.A * u.m ** 2)  # dipole moment
             mag_B_S = (self.pb.mu0_C / (4 * np.pi) * (M / self.pb.R_I ** 3)).to(u.uT)  # surface magnetic field strength
+
+            if mag_Re_m.value < self.Rem_C:  # subcritical: no dynamo (as in the other regimes)
+                mag_B_S = 0 * u.uT
 
             return mag_Re_m, mag_B_S, F_T
 
@@ -324,6 +359,30 @@ class ThermalModel:
 
             return Re_m, B_S, xS, xEUT, dRIC_dt, dTC_dt, dX_dt, F_x, F_th, F_T
 
+        def advance_layer(layer, R_L: u.Quantity, T_L: u.Quantity, X_L: float, xS_0: float, Q_C: u.Quantity,
+                          Q_ad: u.Quantity, dt: u.Quantity, max_frac: float = 0.02, max_sub: int = 10000):
+            # Advance a crystallizing layer (inner core or FeS layer) over one save interval in
+            # substeps. dR/dt = -dT/dt / (rho g Lambda) with g proportional to R inside the core,
+            # so the growth rate is singular as R -> 0 and a single explicit step of length dt
+            # overshoots by hundreds of km. Each substep changes R by at most max_frac * R.
+            t_sub, n_sub = 0 * u.s, 0
+            while t_sub < dt and n_sub < max_sub:
+                _, _, xS, xEUT, dR_dt, dT_dt, dX_dt, _, _, _ = layer(R_L, xS_0, Q_C, Q_ad, X_L)
+
+                dt_sub = dt - t_sub
+                if dR_dt.value != 0:
+                    dt_sub = min(dt_sub, (max_frac * R_L / abs(dR_dt)).to(u.s))
+
+                R_L = min(max(R_L + dR_dt * dt_sub, 0 * u.km), self.pb.R_C)
+                T_L = T_L + dT_dt * dt_sub
+                if xS == xEUT:
+                    X_L += (dX_dt * dt_sub).to_value()
+
+                t_sub += dt_sub
+                n_sub += 1
+
+            return R_L, T_L, X_L
+
         T_C_arr = self.pb.T_mat[0]
         T_CEN_arr = []
 
@@ -356,7 +415,9 @@ class ThermalModel:
             Q_C = Q_C_arr[i]
 
             rho, gamma, cp, alpha = EOS_Morard(wt_S=self.pb.wtS_C, P=self.pb.P_CMB.to(u.Pa).value, T=T_C.value)
-            T_CEN = T_C + self.pb.R_C * alpha * gravity(self.pb, self.pb.R_C) * T_C / cp
+            # Adiabat dT/dr = -alpha g T / cp with g = g_CMB r / R_C inside a uniform-density core;
+            # integrating from R_C to 0 gives the factor 1/2.
+            T_CEN = T_C + 0.5 * self.pb.R_C * alpha * gravity(self.pb, self.pb.R_C) * T_C / cp
 
             Q_ad = (4 * np.pi * self.pb.R_C ** 2 * (
                         self.pb.k_C * alpha * T_C * gravity(pb=self.pb, R=self.pb.R_C) / cp)).to(u.GW)
@@ -370,11 +431,7 @@ class ThermalModel:
                     T_C_IC = T_CEN.copy()
                 Re_m, B_S, xS, xEUT, dRIC_dt, dTC_dt, dX_dt, F_x, F_th, F_T = inner_core(R_IC_IC, xS_0, Q_C, Q_ad, X_OC)
 
-                R_IC_IC += dRIC_dt * dt
-                T_C_IC += dTC_dt * dt
-
-                if xS == xEUT:
-                    X_OC += (dX_dt * dt).to_value()
+                R_IC_IC, T_C_IC, X_OC = advance_layer(inner_core, R_IC_IC, T_C_IC, X_OC, xS_0, Q_C, Q_ad, dt)
 
                 R_IC_arr.append(R_IC_IC.copy())
                 xS_arr.append(xS)
@@ -396,11 +453,7 @@ class ThermalModel:
                     T_C_IC = T_C.copy()
                 Re_m, B_S, xS, xEUT, dRIC_dt, dTC_dt, dX_dt, F_x, F_th, F_T = FeS_layer(R_IC_FES, xS_0, Q_C, Q_ad, X_IC)
 
-                R_IC_FES += dRIC_dt * dt
-                T_C_IC += dTC_dt * dt
-
-                if xS == xEUT:
-                    X_IC += (dX_dt * dt).to_value()
+                R_IC_FES, T_C_IC, X_IC = advance_layer(FeS_layer, R_IC_FES, T_C_IC, X_IC, xS_0, Q_C, Q_ad, dt)
 
                 R_IC_arr.append(R_IC_FES.copy())
                 xS_arr.append(xS)
@@ -522,10 +575,14 @@ class ThermalModel:
         Re_m_arr = self.pb.Re_m_arr.copy()
         B_S_arr = self.pb.B_S_arr.copy()
 
+        xS_full_arr = self.pb.xS_arr.copy()  # full-length S content, filled in below the liquidus
+        delta_t = self.pb.t_arr[1] - self.pb.t_arr[0]  # constant save-cadence timestep
+
         if T_liq_mask.size != 0:
             self.pb.iron_snow = True
             self.pb.crystal_start_time = self.pb.t_arr.to(u.Gyr).value[T_liq_mask[0]]
-            H_St = 1 * u.km
+            H_St_seed = 1 * u.km
+            H_St = H_St_seed.copy()
             x_S = self.pb.wtS_C / 100
             stop_growth = False
 
@@ -544,12 +601,15 @@ class ThermalModel:
                 F_th_arr.append(F_th)
                 F_T_arr.append(F_T)
 
-                delta_t = self.pb.t_arr[i] - self.pb.t_arr[i - 1]
+                # Advance the snow state over [t_i, t_i + delta_t]. (A backward difference
+                # t_arr[i] - t_arr[i - 1] wraps around to t_arr[-1] when i = 0.)
                 x_S = x_S + dxS_dt_snow * delta_t
                 H_St = H_St + dHSt_dt_snow * delta_t
                 if H_St > self.pb.R_C or M_WM.value < 0:
                     H_St = self.pb.R_C.copy()
                     stop_growth = True
+                elif H_St < H_St_seed:  # core being heated (Q_C < 0): layer cannot shrink below its seed
+                    H_St = H_St_seed.copy()
 
 
             Q_ad_snow_arr = u.Quantity(Q_ad_snow_arr)
@@ -560,6 +620,7 @@ class ThermalModel:
             Q_ad_arr[T_liq_mask] = Q_ad_snow_arr
             Re_m_arr[T_liq_mask] = Re_m_snow_arr
             B_S_arr[T_liq_mask] = B_S_snow_arr
+            xS_full_arr[T_liq_mask] = u.Quantity(xS_arr)
 
             self.pb.F_x_arr[T_liq_mask] = F_x_arr
             self.pb.F_th_arr[T_liq_mask] = F_th_arr
@@ -569,4 +630,4 @@ class ThermalModel:
             B_S_arr = np.nan_to_num(B_S_arr)
 
         self.pb.T_liq_mask, self.pb.Q_ad_arr, self.pb.Re_m_arr, self.pb.B_S_arr, self.pb.HSt_arr, self.pb.xS_arr = T_liq_mask, u.Quantity(
-            Q_ad_arr), u.Quantity(Re_m_arr), u.Quantity(B_S_arr), u.Quantity(HSt_arr), u.Quantity(xS_arr)
+            Q_ad_arr), u.Quantity(Re_m_arr), u.Quantity(B_S_arr), u.Quantity(HSt_arr), u.Quantity(xS_full_arr)
